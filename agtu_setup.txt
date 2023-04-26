@@ -1,0 +1,233 @@
+Summary
+The AGTU Simulator's purpose is to allow the validation of the exchanges between the MDSCU and the AGTU device eventually provided by the supplier.
+
+It consists in a virtual machine running on the Power car with its network adapter bridged on the Power car lab PC's "Train Network" adapter. This allows the VM to use the AGTU's real IP address.
+
+On this minimalistic virtual machine, a python program manages the exchange of UDP datagrams with the MDSCU.
+
+The python program also provides a RESTful API with routes to allow setting fields of the datagram outgoing from the AGTU, getting fields received from the MDSCU and stop emission of the datagrams.
+
+Icon
+ There is no outputting of logging. agtu_log.log in the following diagram is not created.
+
+ 
+
+
+
+Virtual Machine
+The Linux distribution "Alpine Linux" was selected because it is lightweight and not much is needed to run the AGTU Simulator. The .iso can be found in the links below.
+
+VM Installation (VmWare)
+Download the .iso from the links below. The Virtual x86_64 is used.
+Using VMWare Player, click "Create new Virtual Machine"
+For installer disc image file, select the downloaded .iso
+Name the machine "AGTU"
+Maximum disk size: 2.0 Gb
+Check "Split disk into multiple files"
+Click on Customize hardware
+Click "Add..."
+Select "Network Adapter"
+Finish
+Modify the properties of the first network adapter to be of type "NAT"
+Modify the second network adapter to be of type "Bridged" and check "Replicate physical network connection state"
+Select "Configure adapters"
+Within the list of adapters, select the adapter corresponding to the train network (IP on the lab PC of the 10.0.1.XXX form)
+For both network adapters, "Connect at power on" should be checked.
+VM Os Installation/Config
+After performing the VM installation as above, run the VM.
+
+login as root
+Enter "setup-alpine". It will prompt several configuration settings.
+For keyboard layout, use "us" and the run "us-intl"
+For hostname, use "agtu"
+ip address for eth0 should be "dhcp"
+ip address for eth1 should be "10.0.1.41"
+netmask for eth1 should be "255.255.240.0"
+No manual configuration
+Password for root: "Password01"
+timezone: Canada/Eastern
+Proxy: None
+ntp client: chrony
+After this, the configuration will attempt to access the internet but it will not work. Ctrl-C to cancel the "setup-alpine"
+Take note of the IP address given via DHCP. Command "ip a" then check IP for eth0.
+Open the network interfaces configuration for editing. "vi /etc/network/interfaces" and reproduce the following, with the eth0 ip address corresponding to what was noted previously.
+Restart the network interfaces: "/etc/init.d/networking restart".
+Now that the VM has access to the internet, we need to configure the DNS for eth0. Enter "setup-dns"
+Use "bombardier.com" for domain name
+Use "10.130.144.4" for DNS nameservers. This address was taken from pulse VPN adapter's DNS on a developer PC.
+Enter "setup-apkrepos" and choose whichever server
+Enter setup-sshd
+Use "openssh" (default)
+Use "prohibit-password" (default)
+Use "none" (default)
+Enter "setup-disk"
+Use "sda"
+Use "sys"
+Use "y" (perform erase of data)
+Reboot
+Configuration
+Install packages
+apk add iptables
+apk add python3
+python -m ensurepip --upgrade
+python -m pip install pipenv
+Open UDP port for reception
+Enter "iptables -A INPUT -p udp -m udp --dport 10183 -j ACCEPT"
+Create a 'developer' user
+Enter "adduser developer"
+Password should be "Password01"
+Running simulator on VM
+Copy files from svn location into /home/developer/AGTU_Simulator. You can use FTP or transfer files with MobaXTerm for example.
+Only for the first time: From that location, run "python -m pipenv install"
+Every time: Run "pipenv shell" then "python simulator.py"
+Icon
+The environment needs to be initialized as such for root and developer separately.
+
+Making the simulator a service
+Alpine Linux uses rc.conf to manage its daemons. It has been configured here to be launched at startup of the VM.
+
+It runs under the developer user.
+
+Create a script to launch the python script in its virtual environment. Here it was placed in /usr/bin and named agtusim_startup_script.sh.
+Populate it with the following:
+
+#!/bin/ash
+cd /home/developer/AGTU_Simulator && pipenv run python simulator.py
+Make the script executable and writable with "chmod 777 /usr/bin/agtusim_startup_script.sh"
+
+Make the script owned by the developer user with "chown developer:developer /usr/bin/agtusim_startup_script.sh"
+Create a file to store the pid of the service. "touch /var/run/agtusim.pid". Leave it empty.
+
+Create the service in /etc/init.d. Here it was named agtusim. (touch /etc/init.d/agtusim)
+
+Populate it with the following:
+
+#!/sbin/openrc-run
+name="AGTU Simulator"
+description="Sends and receives UDP datatagrams to and from MDSCU. Provides a RESTful API to modify outgoing datagrams."
+command=/usr/bin/agtusim_startup_script.sh
+command_user=developer:developer
+command_background=yes
+pidfile=/var/run/agtusim.pid
+Make it executable using "chmod 755 /etc/init.d/agtusim"
+
+Make the service launch at startup with the command "rc-update add agtusim default".
+Icon
+Take note that the PID associated to agtusim is not what is actually running the python script. It is actually the shell in which it was launched. It was difficult to avoid due to pipenv needing to be invoked from the location of the Pipfile, requiring to "cd" there first. See agtusim_startup_script.sh. Had it not been for the "cd", there would be no need for a script and python could be invoked directly.
+
+Making the VM launch at Lab PC startup
+Press Windows + R. Enter "shell:startup". It will open a Windows explorer. Scripts at this location are run at startup
+Create a new file there, name it agtu_vm_run.cmd and copy the following. Take note that the location of vmrun.exe may vary and so may the VM's location.
+The "nogui" at the end will make the vm start in the background.
+
+"C:\Program Files (x86)\VMware\VMware Player\vmrun.exe" start "C:\Users\329-NJT3\Documents\Virtual Machines\AGTU\AGTU.vmx" nogui
+Stopping the VM when it runs in the background
+"C:\Program Files (x86)\VMware\VMware Player\vmrun.exe" stop "C:\Users\329-NJT3\Documents\Virtual Machines\AGTU\AGTU.vmx"
+ 
+
+Considerations when deploying on other machine
+If copying the backup directly, it may be necessary to adapt the network interfaces and DNS to be compatible with the network setup of the PC on which the machine is deployed. Pay attention to the /etc/resolv.conf and /etc/network/interfaces files.
+
+Links
+Name
+Link
+Comments
+Virtual Machine OS Download (website)	downloads | Alpine Linux	Version at time of download was 3.17.1
+Virtual Machine OS Download (Alstom)	\\tcms-arrakis\VM-BASELINE\329_NJT_ML_III\VMs\AGTU	At this location is the original .iso as well as the archived contents of the configured VM.
+Alpine Linux "setup-alpine" info	Alpine setup scripts - Alpine Linux	 
+rc-conf init scripts	Writing Init Scripts - Alpine Linux	 
+Simulator
+Below is a modified copy of the contents of the README.txt found in the root of the simulator.
+
+Files
+Pipfile
+
+Contains packages necessary and used to setup a virtual environment using those packages without installing them in the global python.
+simulator.py
+
+- Contains the Flask application providing a RESTful API to interact with AGTU sent and received datagrams.
+communication.py
+
+Contains the CommunicationHandler class which opens send and receive ports and runs two separate threads for sent and received datagrams. It provides services to stop receiving, stop sending and stop incrementing lifesign of outgoing datagram.
+utilities/datagram_helper.py
+
+Contains several classes facilitating datagram definition, packing and unpacking.
+testing/dummy_mdscu.py
+
+Invoke from parent folder within pipenv virtual environment
+pipenv run testing/dummy_mdscu.py
+Opens sockets on localhost, listens to AGTU_UDP_I1 datagrams on the same port as MDSCU should listen, emits AGTU_UDP_C1 datagrams on the same destination port as the MDSCU (port open on the AGTU).
+Prints received datagram contents if any is received.
+Useful to test on local machine when also changing the remote ip address in communication.py to 127.0.0.1. (back and forth communication on same machine using same ports as AGTU and MDSCU)
+testing/test_requests.http
+
+Collection of http requests performed on the agtu simulator. The VSCode "Rest Client" extension
+was used to send these requests directly.
+
+Configuration
+The application can be configured using environment variables. For example, creating a '.env' file in the same directory as simulator.py. Variables not set have default values appropriate for deployment on AGTU virtual machine. Here is the contents of a .env file that can be used for development:
+
+WEB_HOST_IP=0.0.0.0
+WEB_HOST_PORT=8080
+;MESSAGE_SEND_INTERVAL_MS=1000
+REMOTE_IP_ADDRESS=127.0.0.1
+;REMOTE_RECEIVING_PORT=18301
+;LOCAL_RECEIVING_PORT=10183
+;RCV_BUFFER_SIZE=4096
+PRINT_RECEIVED_DATA=True
+
+ 
+
+If none of these values are defined, the following are employed:
+
+WEB_HOST_IP=10.0.1.41
+WEB_HOST_PORT=8080
+MESSAGE_SEND_INTERVAL_MS=1000
+REMOTE_IP_ADDRESS=10.0.1.22
+REMOTE_RECEIVING_PORT=18301
+LOCAL_RECEIVING_PORT=10183
+RCV_BUFFER_SIZE=4096
+PRINT_RECEIVED_DATA=False
+
+Execution
+Run "pipenv shell" then "python simulator.py"
+OR
+
+Run "pipenv run python simulator.py"
+Available routes
+GET /setValue/<field_name>/<value> - sets a field value automatically sent in the next outbound telegram <br/>
+PUT /setValues/<data> - sets the fields of outgoing telegram to the json {'key' : 'value'} pairs <br/>
+GET /getValue/<direction>/<field_name> - gets a value from for the latest outgoing or incoming telegram. <direction> accepts 'in' or 'out' <br/>
+GET /getValues/<direction> - returns all field names and their values. <direction> accepts 'in' or 'out' <br/>
+GET /stopSending/<value> - true to stop sending telegrams. false to re-enable sending telegrams <br/>
+GET /stopReceiving/<value> - true to stop receiving telegrams. false to re-enable receiving telegrams <br/>
+GET /stopIncrementing/<value> - true to stop auto-incrementing IMsgNumber field of outgoing telegram. false to resume incrementing.
+
+Stopping the simulator when it was launched from service
+Enter the command "top"
+Locate the following, usually near the top
+
+Enter "kill -9 <PID>". Here PID would be 3103.
+Links
+Name
+Link
+Comments
+AGTU Simulator svn location	
+svn://svn-tcms-btna/BTAME/329_NJT_ML3/TCMS/Trunk/Software/329_NJT_ML3/TCMS/Tests/Tools/AGTU_Simulator
+
+ 
+ 	 	 
+Testing
+RTSim test cases should perform REST commands to the AGTU. They should check that the return code is OK (200) and use the json responses.
+
+Some test cases already parse json structures using GET requests. Below is a resource that can be used to perform PUT requests in C# .NET. 
+
+Links
+Name
+Link
+Comments
+C# HttpClient requests (needed for PUT)	
+HttpClient Class (System.Net.Http) | Microsoft Learn
+
+ Specific to .NET 4.5 as used in test cases
+ 	 	 
